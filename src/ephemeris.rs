@@ -4,12 +4,13 @@ use num_enum::TryFromPrimitive;
 /// Currently only includes position entries (record type = 10).
 #[derive(Debug, Clone)]
 pub struct Ephemeris {
-    pub direction_flag: Vec<DirectionFlag>,
+    /// None when parsed with assert_common_epoch_only
+    pub direction_flag: Option<Vec<DirectionFlag>>,
     /// Modified Julian Date (MJD)
     pub mjd: Vec<i32>,
     pub seconds_of_day: Vec<f64>,
-    /// Leap second flag (0 or the value of the new leap second)
-    pub leap_second_flag: Vec<i32>,
+    /// None when parsed with assert_no_leap_second
+    pub leap_second_flag: Option<Vec<i32>>,
     /// Positions in meters (x, y, z)
     pub position_m: Vec<[f64; 3]>,
 }
@@ -26,22 +27,4 @@ pub enum DirectionFlag {
     /// Receive: position vector contains light-time iterated travel time
     /// from the target to the geocenter at the receive epoch
     Receive = 2,
-}
-
-impl Ephemeris {
-    /// Push position record entry
-    pub fn push_position(
-        &mut self,
-        direction_flag: DirectionFlag,
-        mjd: i32,
-        seconds_of_day_utc: f64,
-        leap_second_flag: i32,
-        position: [f64; 3],
-    ) {
-        self.direction_flag.push(direction_flag);
-        self.mjd.push(mjd);
-        self.seconds_of_day.push(seconds_of_day_utc);
-        self.leap_second_flag.push(leap_second_flag);
-        self.position_m.push(position);
-    }
 }

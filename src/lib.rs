@@ -4,7 +4,7 @@ pub mod reader;
 
 pub use ephemeris::Ephemeris;
 pub use header::Header;
-pub use reader::read_cpf_v2;
+pub use reader::{ParseOptions, read_cpf_v2, read_cpf_v2_with_options};
 
 #[cfg(test)]
 mod tests {
@@ -83,21 +83,24 @@ mod tests {
         assert_eq!(ephemeris.mjd.len(), 480);
 
         // First record: 10 0 53703  86387.000000  0  -20733881.936   1385083.581  16779721.134
-        assert_eq!(ephemeris.direction_flag[0], DirectionFlag::CommonEpoch);
+        assert_eq!(
+            ephemeris.direction_flag.as_ref().unwrap()[0],
+            DirectionFlag::CommonEpoch
+        );
         assert_eq!(ephemeris.mjd[0], 53703);
         assert!((ephemeris.seconds_of_day[0] - 86387.0).abs() < 1e-6);
-        assert!(ephemeris.leap_second_flag[0] == 0);
-        assert!((ephemeris.position_m[0].x - (-20733881.936)).abs() < 1e-3);
-        assert!((ephemeris.position_m[0].y - 1385083.581).abs() < 1e-3);
-        assert!((ephemeris.position_m[0].z - 16779721.134).abs() < 1e-3);
+        assert!(ephemeris.leap_second_flag.as_ref().unwrap()[0] == 0);
+        assert!((ephemeris.position_m[0][0] - (-20733881.936)).abs() < 1e-6);
+        assert!((ephemeris.position_m[0][1] - 1385083.581).abs() < 1e-6);
+        assert!((ephemeris.position_m[0][2] - 16779721.134).abs() < 1e-6);
 
         // Last record: 10 0 53708  85487.000000  0  -20242610.289    844653.053  17406764.424
         let last = ephemeris.mjd.len() - 1;
         assert_eq!(ephemeris.mjd[last], 53708);
         assert!((ephemeris.seconds_of_day[last] - 85487.0).abs() < 1e-6);
-        assert!((ephemeris.position_m[last].x - (-20242610.289)).abs() < 1e-3);
-        assert!((ephemeris.position_m[last].y - 844653.053).abs() < 1e-3);
-        assert!((ephemeris.position_m[last].z - 17406764.424).abs() < 1e-3);
+        assert!((ephemeris.position_m[last][0] - (-20242610.289)).abs() < 1e-6);
+        assert!((ephemeris.position_m[last][1] - 844653.053).abs() < 1e-6);
+        assert!((ephemeris.position_m[last][2] - 17406764.424).abs() < 1e-6);
     }
 
     #[test]
@@ -159,5 +162,60 @@ mod tests {
         let reader = Cursor::new(data);
         let result = read_cpf_v2(reader);
         assert!(matches!(result, Err(ParseError::InvalidFieldValue { field, .. }) if field == 2));
+    }
+
+    #[test]
+    fn test_parse_options_assertions() {
+        let data = include_bytes!("../test_data/gps36_cpf_051129_33401.codv2");
+        let reader = Cursor::new(data);
+        let options = ParseOptions {
+            assert_common_epoch_only: true,
+            assert_no_leap_second: true,
+        };
+        let (_header, ephemeris) = read_cpf_v2_with_options(reader, &options).unwrap();
+        assert!(ephemeris.direction_flag.is_none());
+        assert!(ephemeris.leap_second_flag.is_none());
+        assert_eq!(ephemeris.mjd.len(), 480);
+    }
+
+    #[test]
+    fn test_parse_options_violations() {
+        let header = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\nH9\n";
+
+        // direction_flag=1 with assert_common_epoch_only
+        let mut data = Vec::from(&header[..]);
+        data.extend_from_slice(
+            b"10 1 53703 86387.000000 0 -20733881.936 1385083.581 16779721.134\n99\n",
+        );
+        let result = read_cpf_v2_with_options(
+            Cursor::new(data),
+            &ParseOptions {
+                assert_common_epoch_only: true,
+                ..Default::default()
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(ParseError::AssertionViolation { message, .. })
+            if message.contains("direction_flag")
+        ));
+
+        // leap_second=1 with assert_no_leap_second
+        let mut data = Vec::from(&header[..]);
+        data.extend_from_slice(
+            b"10 0 53703 86387.000000 1 -20733881.936 1385083.581 16779721.134\n99\n",
+        );
+        let result = read_cpf_v2_with_options(
+            Cursor::new(data),
+            &ParseOptions {
+                assert_no_leap_second: true,
+                ..Default::default()
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(ParseError::AssertionViolation { message, .. })
+            if message.contains("leap_second")
+        ));
     }
 }

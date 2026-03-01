@@ -50,6 +50,17 @@ pub enum ParseError {
 
     #[error("unexpected end of file")]
     UnexpectedEof,
+
+    #[error("{line}: assertion violated: {message}")]
+    AssertionViolation { line: usize, message: &'static str },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParseOptions {
+    /// Assert all direction flags are CommonEpoch (0). Omits field from result.
+    pub assert_common_epoch_only: bool,
+    /// Assert all leap second flags are 0. Omits field from result.
+    pub assert_no_leap_second: bool,
 }
 
 enum State {
@@ -111,13 +122,28 @@ impl<'a> Record<'a> {
     }
 }
 
-pub fn read_cpf_v2(mut reader: impl BufRead) -> Result<(Header, Ephemeris), ParseError> {
+pub fn read_cpf_v2(reader: impl BufRead) -> Result<(Header, Ephemeris), ParseError> {
+    read_cpf_v2_with_options(reader, &ParseOptions::default())
+}
+
+pub fn read_cpf_v2_with_options(
+    mut reader: impl BufRead,
+    options: &ParseOptions,
+) -> Result<(Header, Ephemeris), ParseError> {
     let mut header = Header::default();
     let mut ephemeris = Ephemeris {
-        direction_flag: Vec::new(),
+        direction_flag: if options.assert_common_epoch_only {
+            None
+        } else {
+            Some(Vec::new())
+        },
         mjd: Vec::new(),
         seconds_of_day: Vec::new(),
-        leap_second_flag: Vec::new(),
+        leap_second_flag: if options.assert_no_leap_second {
+            None
+        } else {
+            Some(Vec::new())
+        },
         position_m: Vec::new(),
     };
 
@@ -177,7 +203,7 @@ pub fn read_cpf_v2(mut reader: impl BufRead) -> Result<(Header, Ephemeris), Pars
             }
             State::ReadingEphemeris => match record_type.as_str() {
                 "10" => {
-                    read_10(&record, &mut ephemeris)?;
+                    read_10(&record, &mut ephemeris, options)?;
                 }
                 "99" => {
                     break;
@@ -195,7 +221,11 @@ pub fn read_cpf_v2(mut reader: impl BufRead) -> Result<(Header, Ephemeris), Pars
     Ok((header, ephemeris))
 }
 
-fn read_10(r: &Record, ephemeris: &mut Ephemeris) -> Result<(), ParseError> {
+fn read_10(
+    r: &Record,
+    ephemeris: &mut Ephemeris,
+    options: &ParseOptions,
+) -> Result<(), ParseError> {
     r.expect_len(8, "8")?;
 
     let direction_flag: DirectionFlag = r.enumv(1, "must be 0, 1, or 2")?;
@@ -206,13 +236,29 @@ fn read_10(r: &Record, ephemeris: &mut Ephemeris) -> Result<(), ParseError> {
     let y: f64 = r.float(6)?;
     let z: f64 = r.float(7)?;
 
-    ephemeris.push_position(
-        direction_flag,
-        mjd,
-        seconds_of_day,
-        leap_second_flag,
-        [x, y, z],
-    );
+    if options.assert_common_epoch_only && direction_flag != DirectionFlag::CommonEpoch {
+        return Err(ParseError::AssertionViolation {
+            line: r.line,
+            message: "direction_flag is not CommonEpoch (0)",
+        });
+    }
+
+    if options.assert_no_leap_second && leap_second_flag != 0 {
+        return Err(ParseError::AssertionViolation {
+            line: r.line,
+            message: "leap_second_flag is not 0",
+        });
+    }
+
+    if let Some(ref mut v) = ephemeris.direction_flag {
+        v.push(direction_flag);
+    }
+    ephemeris.mjd.push(mjd);
+    ephemeris.seconds_of_day.push(seconds_of_day);
+    if let Some(ref mut v) = ephemeris.leap_second_flag {
+        v.push(leap_second_flag);
+    }
+    ephemeris.position_m.push([x, y, z]);
 
     Ok(())
 }

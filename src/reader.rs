@@ -55,7 +55,7 @@ pub enum ParseError {
     AssertionViolation { line: usize, message: &'static str },
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ParseOptions {
     /// Assert all direction flags are CommonEpoch (0). Omits field from result.
     pub assert_common_epoch_only: bool,
@@ -122,11 +122,16 @@ impl<'a> Record<'a> {
     }
 }
 
-pub fn read_cpf_v2(reader: impl BufRead) -> Result<(Header, Ephemeris), ParseError> {
-    read_cpf_v2_with_options(reader, &ParseOptions::default())
-}
-
-pub fn read_cpf_v2_with_options(
+/// Parse a CPFv2 file.
+///
+/// Options allow asserting invariants (e.g. all direction flags are `CommonEpoch`)
+/// and omitting the corresponding fields from the result.
+///
+/// # Errors
+///
+/// Returns [`ParseError`] if the input is not a valid CPFv2 file, or if an
+/// assertion specified in `options` is violated.
+pub fn read_cpf_v2(
     mut reader: impl BufRead,
     options: &ParseOptions,
 ) -> Result<(Header, Ephemeris), ParseError> {

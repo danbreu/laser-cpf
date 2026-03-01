@@ -1,7 +1,12 @@
 [package]
 name = "laser-cpf"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
+license = "MIT"
+description = "Parser for CPFv2 (Consolidated Prediction Format) files"
+readme = "README.md"
+keywords = ["cpf", "satellite", "ephemeris"]
+categories = ["parser-implementations", "science"]
 
 [dependencies]
 num_enum = "0.7.5"

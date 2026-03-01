@@ -1,4 +1,4 @@
-use laser_cpf::read_cpf_v2;
+use laser_cpf::{ParseOptions, read_cpf_v2};
 use std::env;
 use std::fs::File;
 use std::io::BufReader;
@@ -21,7 +21,7 @@ fn main() {
     };
 
     let reader = BufReader::new(file);
-    match read_cpf_v2(reader) {
+    match read_cpf_v2(reader, &ParseOptions::default()) {
         Ok((header, ephemeris)) => {
             println!("{:#?}", header);
             println!("{:#?}", ephemeris);

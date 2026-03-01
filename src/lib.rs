@@ -1,10 +1,31 @@
+//! Parser for [CPFv2](https://ilrs.gsfc.nasa.gov/data_and_products/formats/cpf.html) (Consolidated Prediction Format) files.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use std::io::BufReader;
+//! use std::fs::File;
+//! use laser_cpf::{ParseOptions, read_cpf_v2};
+//!
+//! let file = File::open("terrasarx_cpf_250101_00101.gfz")?;
+//! let reader = BufReader::new(file);
+//! let (header, ephemeris) = read_cpf_v2(reader, &ParseOptions::default())?;
+//!
+//! println!("Target: {}", header.target_name);
+//! println!("Records: {}", ephemeris.mjd.len());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+
 pub mod ephemeris;
 pub mod header;
 pub mod reader;
 
-pub use ephemeris::Ephemeris;
-pub use header::Header;
-pub use reader::{ParseOptions, read_cpf_v2, read_cpf_v2_with_options};
+pub use ephemeris::{DirectionFlag, Ephemeris};
+pub use header::{
+    CenterOfMassCorrection, Header, ReferenceFrame, RotationalAngleType, TargetClass,
+    TargetLocationDynamics,
+};
+pub use reader::{ParseError, ParseOptions, read_cpf_v2};
 
 #[cfg(test)]
 mod tests {
@@ -17,7 +38,7 @@ mod tests {
     fn test_parse_gps36_header() {
         let data = include_bytes!("../test_data/gps36_cpf_051129_33401.codv2");
         let reader = Cursor::new(data);
-        let (header, _ephemeris) = read_cpf_v2(reader).unwrap();
+        let (header, _ephemeris) = read_cpf_v2(reader, &ParseOptions::default()).unwrap();
 
         // H1 fields
         assert_eq!(header.ephemeris_source, "COD");
@@ -67,7 +88,7 @@ mod tests {
     fn test_notes() {
         let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(matches!(result, Err(..)));
     }
 
@@ -77,7 +98,7 @@ mod tests {
 
         let data = include_bytes!("../test_data/gps36_cpf_051129_33401.codv2");
         let reader = Cursor::new(data);
-        let (_header, ephemeris) = read_cpf_v2(reader).unwrap();
+        let (_header, ephemeris) = read_cpf_v2(reader, &ParseOptions::default()).unwrap();
 
         // 480 position records in file
         assert_eq!(ephemeris.mjd.len(), 480);
@@ -107,7 +128,7 @@ mod tests {
     fn test_empty_ephemeris() {
         let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\nH9\n99";
         let reader = Cursor::new(data);
-        let (_header, ephemeris) = read_cpf_v2(reader).unwrap();
+        let (_header, ephemeris) = read_cpf_v2(reader, &ParseOptions::default()).unwrap();
         assert_eq!(ephemeris.mjd.len(), 0);
     }
 
@@ -116,7 +137,7 @@ mod tests {
         let data =
             b"H2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\nH9\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(
             matches!(result, Err(ParseError::InvalidRecordType { expected, .. }) if expected == "H1")
         );
@@ -126,7 +147,7 @@ mod tests {
     fn test_missing_h2() {
         let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\nH9\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(
             matches!(result, Err(ParseError::InvalidRecordType { expected, .. }) if expected == "H2")
         );
@@ -136,7 +157,7 @@ mod tests {
     fn test_missing_h9() {
         let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(matches!(result, Err(..)));
     }
 
@@ -144,7 +165,7 @@ mod tests {
     fn test_missing_99() {
         let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\nH9\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(matches!(result, Err(..)));
     }
 
@@ -152,7 +173,7 @@ mod tests {
     fn test_invalid_cpf_format() {
         let data = b"H1 AUA 2 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\nH9\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(matches!(result, Err(ParseError::InvalidFieldValue { field, .. }) if field == 1));
     }
 
@@ -160,7 +181,7 @@ mod tests {
     fn test_invalid_cpf_version() {
         let data = b"H1 CPF 1 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\nH9\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(matches!(result, Err(ParseError::InvalidFieldValue { field, .. }) if field == 2));
     }
 
@@ -172,7 +193,7 @@ mod tests {
             assert_common_epoch_only: true,
             assert_no_leap_second: true,
         };
-        let (_header, ephemeris) = read_cpf_v2_with_options(reader, &options).unwrap();
+        let (_header, ephemeris) = read_cpf_v2(reader, &options).unwrap();
         assert!(ephemeris.direction_flag.is_none());
         assert!(ephemeris.leap_second_flag.is_none());
         assert_eq!(ephemeris.mjd.len(), 480);
@@ -182,7 +203,7 @@ mod tests {
     fn test_no_velocity_records() {
         let data = include_bytes!("../test_data/gps36_cpf_051129_33401.codv2");
         let reader = Cursor::new(data);
-        let (_header, ephemeris) = read_cpf_v2(reader).unwrap();
+        let (_header, ephemeris) = read_cpf_v2(reader, &ParseOptions::default()).unwrap();
         assert!(ephemeris.velocity_m_per_s.is_none());
     }
 
@@ -198,7 +219,7 @@ mod tests {
             20 2 -100.200 300.400 -500.600\n\
             99\n";
         let reader = Cursor::new(data);
-        let (_header, ephemeris) = read_cpf_v2(reader).unwrap();
+        let (_header, ephemeris) = read_cpf_v2(reader, &ParseOptions::default()).unwrap();
 
         assert_eq!(ephemeris.position_m.len(), 2);
         let vel = ephemeris.velocity_m_per_s.as_ref().unwrap();
@@ -223,7 +244,7 @@ mod tests {
             20 2 1234.567 -891.012 345.678\n\
             99\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(matches!(
             result,
             Err(ParseError::InvalidFieldValue { field: 1, reason, .. })
@@ -240,7 +261,7 @@ mod tests {
             20 0 1234.567 -891.012 345.678\n\
             99\n";
         let reader = Cursor::new(data);
-        let result = read_cpf_v2(reader);
+        let result = read_cpf_v2(reader, &ParseOptions::default());
         assert!(matches!(
             result,
             Err(ParseError::InvalidFieldValue { field: 0, reason, .. })
@@ -257,7 +278,7 @@ mod tests {
         data.extend_from_slice(
             b"10 1 53703 86387.000000 0 -20733881.936 1385083.581 16779721.134\n99\n",
         );
-        let result = read_cpf_v2_with_options(
+        let result = read_cpf_v2(
             Cursor::new(data),
             &ParseOptions {
                 assert_common_epoch_only: true,
@@ -275,7 +296,7 @@ mod tests {
         data.extend_from_slice(
             b"10 0 53703 86387.000000 1 -20733881.936 1385083.581 16779721.134\n99\n",
         );
-        let result = read_cpf_v2_with_options(
+        let result = read_cpf_v2(
             Cursor::new(data),
             &ParseOptions {
                 assert_no_leap_second: true,

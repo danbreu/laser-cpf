@@ -179,6 +179,76 @@ mod tests {
     }
 
     #[test]
+    fn test_no_velocity_records() {
+        let data = include_bytes!("../test_data/gps36_cpf_051129_33401.codv2");
+        let reader = Cursor::new(data);
+        let (_header, ephemeris) = read_cpf_v2(reader).unwrap();
+        assert!(ephemeris.velocity_m_per_s.is_none());
+    }
+
+    #[test]
+    fn test_parse_velocity_records() {
+        // Transponder-style grouping: 10-1, 10-2, 20-1, 20-2
+        let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\n\
+            H2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\n\
+            H9\n\
+            10 1 53703 86387.000000 0 -20733881.936 1385083.581 16779721.134\n\
+            10 2 53703 86387.000000 0 -20600000.000 1400000.000 16800000.000\n\
+            20 1 1234.567 -891.012 345.678\n\
+            20 2 -100.200 300.400 -500.600\n\
+            99\n";
+        let reader = Cursor::new(data);
+        let (_header, ephemeris) = read_cpf_v2(reader).unwrap();
+
+        assert_eq!(ephemeris.position_m.len(), 2);
+        let vel = ephemeris.velocity_m_per_s.as_ref().unwrap();
+        assert_eq!(vel.len(), 2);
+
+        assert!((vel[0][0] - 1234.567).abs() < 1e-6);
+        assert!((vel[0][1] - (-891.012)).abs() < 1e-6);
+        assert!((vel[0][2] - 345.678).abs() < 1e-6);
+
+        assert!((vel[1][0] - (-100.200)).abs() < 1e-6);
+        assert!((vel[1][1] - 300.400).abs() < 1e-6);
+        assert!((vel[1][2] - (-500.600)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_velocity_direction_flag_mismatch() {
+        // 10 with direction_flag=1, then 20 with direction_flag=2 -> should error
+        let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\n\
+            H2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\n\
+            H9\n\
+            10 1 53703 86387.000000 0 -20733881.936 1385083.581 16779721.134\n\
+            20 2 1234.567 -891.012 345.678\n\
+            99\n";
+        let reader = Cursor::new(data);
+        let result = read_cpf_v2(reader);
+        assert!(matches!(
+            result,
+            Err(ParseError::InvalidFieldValue { field: 1, reason, .. })
+            if reason.contains("direction_flag")
+        ));
+    }
+
+    #[test]
+    fn test_velocity_without_position() {
+        // 20 record before any 10 -> should error
+        let data = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\n\
+            H2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\n\
+            H9\n\
+            20 0 1234.567 -891.012 345.678\n\
+            99\n";
+        let reader = Cursor::new(data);
+        let result = read_cpf_v2(reader);
+        assert!(matches!(
+            result,
+            Err(ParseError::InvalidFieldValue { field: 0, reason, .. })
+            if reason.contains("without corresponding position")
+        ));
+    }
+
+    #[test]
     fn test_parse_options_violations() {
         let header = b"H1 CPF 2 COD 2005 11 30 04 334 1 gps36\nH2 9401601 3636 23027 2005 11 29 23 59 47 2005 12 04 23 44 47 900 1 1 0 0 0 1\nH9\n";
 

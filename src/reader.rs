@@ -145,6 +145,7 @@ pub fn read_cpf_v2_with_options(
             Some(Vec::new())
         },
         position_m: Vec::new(),
+        velocity_m_per_s: None,
     };
 
     let mut state = State::ExpectH1;
@@ -205,13 +206,16 @@ pub fn read_cpf_v2_with_options(
                 "10" => {
                     read_10(&record, &mut ephemeris, options)?;
                 }
+                "20" => {
+                    read_20(&record, &mut ephemeris, options)?;
+                }
                 "99" => {
                     break;
                 }
                 _ => {
                     return Err(ParseError::InvalidRecordType {
                         line: line_num,
-                        expected: "10 or 99",
+                        expected: "10, 20, or 99",
                     });
                 }
             },
@@ -259,6 +263,50 @@ fn read_10(
         v.push(leap_second_flag);
     }
     ephemeris.position_m.push([x, y, z]);
+
+    Ok(())
+}
+
+fn read_20(
+    r: &Record,
+    ephemeris: &mut Ephemeris,
+    options: &ParseOptions,
+) -> Result<(), ParseError> {
+    r.expect_len(5, "5")?;
+
+    let direction_flag: DirectionFlag = r.enumv(1, "must be 0, 1, or 2")?;
+    let vx: f64 = r.float(2)?;
+    let vy: f64 = r.float(3)?;
+    let vz: f64 = r.float(4)?;
+
+    if options.assert_common_epoch_only && direction_flag != DirectionFlag::CommonEpoch {
+        return Err(ParseError::AssertionViolation {
+            line: r.line,
+            message: "direction_flag is not CommonEpoch (0)",
+        });
+    }
+
+    let vel_index = ephemeris.velocity_m_per_s.as_ref().map_or(0, |v| v.len());
+    if vel_index >= ephemeris.position_m.len() {
+        return Err(ParseError::InvalidFieldValue {
+            line: r.line,
+            field: 0,
+            reason: "velocity record (20) without corresponding position record (10)",
+        });
+    }
+
+    if let Some(ref flags) = ephemeris.direction_flag {
+        if flags[vel_index] != direction_flag {
+            return Err(ParseError::InvalidFieldValue {
+                line: r.line,
+                field: 1,
+                reason: "velocity direction_flag does not match corresponding position record",
+            });
+        }
+    }
+
+    let vel = ephemeris.velocity_m_per_s.get_or_insert_with(Vec::new);
+    vel.push([vx, vy, vz]);
 
     Ok(())
 }

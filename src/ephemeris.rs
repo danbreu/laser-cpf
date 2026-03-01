@@ -13,6 +13,9 @@ pub struct Ephemeris {
     pub leap_second_flag: Option<Vec<i32>>,
     /// Positions in meters (x, y, z)
     pub position_m: Vec<[f64; 3]>,
+    /// Velocities in m/s (vx, vy, vz) from record type 20.
+    /// None when no velocity records are present in the file.
+    pub velocity_m_per_s: Option<Vec<[f64; 3]>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, TryFromPrimitive)]
